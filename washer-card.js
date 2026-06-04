@@ -1,5 +1,5 @@
 // =====================================================================
-//  Washer Card v1.0.4
+//  Washer Card v1.0.5
 // =====================================================================
 
 const _WC_LABELS = {
@@ -60,6 +60,36 @@ function _wcFmtPower(w) {
   return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`;
 }
 
+function _wcFmtTime(st) {
+  if (!st) return null;
+  const unit = (st.attributes?.unit_of_measurement || '').toLowerCase().trim();
+  // HA timer-Entität: remaining-Attribut "H:MM:SS"
+  if (st.attributes?.remaining) {
+    const parts = st.attributes.remaining.split(':').map(Number);
+    if (parts.length === 3) {
+      const [h, m, s] = parts;
+      if (h > 0) return `${h}:${String(m).padStart(2,'0')}`;
+      if (m > 0) return `${m}:${String(s).padStart(2,'0')}`;
+      return s > 0 ? `${s} s` : null;
+    }
+    return st.attributes.remaining;
+  }
+  const val = parseFloat(st.state);
+  if (isNaN(val) || val <= 0) return null;
+  if (unit === 'min' || unit === 'minutes' || unit === 'minute') {
+    const h = Math.floor(val / 60);
+    const m = Math.round(val % 60);
+    return h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${Math.round(val)} min`;
+  }
+  if (['s','sec','seconds','second'].includes(unit)) {
+    const m = Math.floor(val / 60);
+    const s = Math.round(val % 60);
+    return m > 0 ? `${m}:${String(s).padStart(2,'0')}` : `${Math.round(val)} s`;
+  }
+  if (/^\d+:\d{2}(:\d{2})?$/.test(st.state)) return st.state;
+  return st.state + (unit ? ' ' + unit : '');
+}
+
 // =====================================================================
 //  Haupt-Card
 // =====================================================================
@@ -84,6 +114,7 @@ class WasherCard extends HTMLElement {
       tap_action:     { action: 'more-info' },
       border_radius:  16,
       popup_controls: [],
+      timer_entity:   '',
       ...config,
     };
     if (!Array.isArray(this._config.popup_controls)) this._config.popup_controls = [];
@@ -368,6 +399,8 @@ class WasherCard extends HTMLElement {
     const stateColor = _wcColor(rawState, isOn);
     const stateLabel = _wcLabel(rawState);
     const powerWatts = _wcWatts(powerSt);
+    const timerSt    = cfg.timer_entity ? this._hass.states[cfg.timer_entity] : null;
+    const timerDisp  = isOn ? _wcFmtTime(timerSt) : null;
     const name       = cfg.name
       || mainSt?.attributes?.friendly_name
       || stateSt?.attributes?.friendly_name
@@ -379,7 +412,7 @@ class WasherCard extends HTMLElement {
     const popupStates = (cfg.popup_controls || [])
       .map(c => `${c.entity}:${this._hass.states[c.entity]?.state}`).join(',');
 
-    const key = [rawState, isOn, isRunning, powerWatts, popupStates, JSON.stringify(cfg)].join('|');
+    const key = [rawState, isOn, isRunning, powerWatts, timerDisp, popupStates, JSON.stringify(cfg)].join('|');
     if (key === this._lastKey) return;
     this._lastKey = key;
 
@@ -454,7 +487,18 @@ class WasherCard extends HTMLElement {
         @keyframes drum-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         @keyframes finish-pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
         .details { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
-        .name { font-size:14px; font-weight:600; color:rgba(255,255,255,0.9); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .name-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .name { font-size:14px; font-weight:600; color:rgba(255,255,255,0.9); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
+        .timer-badge {
+          display:flex; align-items:center; gap:4px; flex-shrink:0;
+          font-size:11px; font-weight:700; font-variant-numeric:tabular-nums;
+          color:${stateColor};
+          background:${stateColor}18;
+          border:1px solid ${stateColor}33;
+          border-radius:6px; padding:2px 7px;
+          white-space:nowrap;
+        }
+        .timer-badge ha-icon { --mdc-icon-size:13px; }
         .state-row { display:flex; align-items:center; gap:7px; }
         .dot {
           width:7px; height:7px; border-radius:50%; flex-shrink:0;
@@ -477,7 +521,14 @@ class WasherCard extends HTMLElement {
         <div class="main">
           <div class="icon-wrap">${machineIcon}</div>
           <div class="details">
-            <div class="name">${name}</div>
+            <div class="name-row">
+              <div class="name">${name}</div>
+              ${timerDisp ? `
+                <div class="timer-badge">
+                  <ha-icon icon="mdi:timer-outline"></ha-icon>
+                  ${timerDisp}
+                </div>` : ''}
+            </div>
             ${cfg.show_state !== false ? `
               <div class="state-row">
                 <div class="dot"></div>
@@ -555,7 +606,8 @@ class WasherCardEditor extends HTMLElement {
     const c      = this._config;
     const active = root.activeElement;
 
-    [['field_entity','entity'],['field_state_entity','state_entity'],['field_power_entity','power_entity']]
+    [['field_entity','entity'],['field_state_entity','state_entity'],
+     ['field_power_entity','power_entity'],['field_timer_entity','timer_entity']]
       .forEach(([fid, key]) => {
         const el  = root.getElementById(fid)?.querySelector('input[type=text]');
         const btn = root.getElementById(fid)?.querySelector('button');
@@ -656,9 +708,10 @@ class WasherCardEditor extends HTMLElement {
   }
 
   _rebuildEntityFields() {
-    this._buildEntityField('field_entity',       'Haupt-Entität (An / Aus)',   'entity');
-    this._buildEntityField('field_state_entity', 'Programm-Sensor (optional)', 'state_entity');
-    this._buildEntityField('field_power_entity', 'Leistungssensor (optional)', 'power_entity');
+    this._buildEntityField('field_entity',       'Haupt-Entität (An / Aus)',       'entity');
+    this._buildEntityField('field_state_entity', 'Programm-Sensor (optional)',     'state_entity');
+    this._buildEntityField('field_power_entity', 'Leistungssensor (optional)',     'power_entity');
+    this._buildEntityField('field_timer_entity', 'Restzeit-Sensor (optional)',     'timer_entity');
   }
 
   _updateActionFields() {
@@ -863,8 +916,9 @@ class WasherCardEditor extends HTMLElement {
           <div class="field" id="field_entity"></div>
           <div class="field" id="field_state_entity"></div>
           <div class="field" id="field_power_entity"></div>
+          <div class="field" id="field_timer_entity"></div>
         </div>
-        <div class="hint">Die Haupt-Entität bestimmt An/Aus. Der Programm-Sensor zeigt den Waschgang und steuert die Animation.</div>
+        <div class="hint">Restzeit-Sensor: wird nur angezeigt wenn das Gerät an ist. Unterstützt Sensoren in Minuten, Sekunden und HA-Timer-Entitäten.</div>
 
         <div class="section">Popup-Steuerung</div>
         <div class="hint">Beim Antippen der Karte erscheint ein Popup mit diesen Bedienelementen. Switch = An/Aus-Schalter, Select = Auswahlliste (z.&nbsp;B. Schleudergang).</div>

@@ -1,5 +1,5 @@
 // =====================================================================
-//  Washer Card v1.0.1
+//  Washer Card v1.0.2
 // =====================================================================
 
 const _WC_LABELS = {
@@ -157,8 +157,64 @@ class WasherCard extends HTMLElement {
       || mainSt?.attributes?.friendly_name
       || stateSt?.attributes?.friendly_name
       || (cfg.machine_type === 'dryer' ? 'Trockner' : 'Waschmaschine');
-    const icon       = cfg.machine_type === 'dryer' ? 'mdi:tumble-dryer' : 'mdi:washing-machine';
     const br         = cfg.border_radius ?? 16;
+
+    const iconColor  = isOn ? stateColor : 'rgba(255,255,255,0.3)';
+    const drumStyle  = `transform-box:fill-box;transform-origin:center;${isRunning ? 'animation:drum-spin 3s linear infinite;' : ''}`;
+
+    // Waschmaschine: Gehäuse + Bullaugen-Trommel
+    const washerSVG = `
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
+           style="width:52px;height:52px;color:${iconColor};">
+        <!-- Gehäuse -->
+        <rect x="1" y="1" width="22" height="22" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <!-- Bedienfeld-Trennlinie -->
+        <line x1="1" y1="6.5" x2="23" y2="6.5" stroke="currentColor" stroke-width="1"/>
+        <!-- Tasten links -->
+        <circle cx="4"   cy="3.8" r="1.2" fill="currentColor"/>
+        <circle cx="7.5" cy="3.8" r="1.2" fill="currentColor"/>
+        <!-- Ein/Aus-Knopf rechts -->
+        <circle cx="20" cy="3.8" r="1.8" stroke="currentColor" stroke-width="1"/>
+        <!-- Türring (statisch) -->
+        <circle cx="12" cy="14" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+        <!-- Trommel (rotiert) -->
+        <g style="${drumStyle}">
+          <circle cx="12" cy="14" r="4" stroke="currentColor" stroke-width="1"/>
+          <circle cx="12"  cy="11.2" r="0.9" fill="currentColor"/>
+          <circle cx="14.4" cy="15.4" r="0.9" fill="currentColor"/>
+          <circle cx="9.6"  cy="15.4" r="0.9" fill="currentColor"/>
+        </g>
+      </svg>`;
+
+    // Trockner: Gehäuse + Mitnehmer-Paddle-Trommel + Lüftungsschlitze
+    const dryerSVG = `
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
+           style="width:52px;height:52px;color:${iconColor};">
+        <!-- Gehäuse -->
+        <rect x="1" y="1" width="22" height="22" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <!-- Bedienfeld-Trennlinie -->
+        <line x1="1" y1="6.5" x2="23" y2="6.5" stroke="currentColor" stroke-width="1"/>
+        <!-- Taste links -->
+        <circle cx="4.5" cy="3.8" r="1.2" fill="currentColor"/>
+        <!-- Drehregler rechts -->
+        <circle cx="19" cy="3.8" r="2"  stroke="currentColor" stroke-width="1"/>
+        <line x1="19" y1="3.8" x2="19" y2="1.9" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/>
+        <!-- Türring (statisch) -->
+        <circle cx="12" cy="14" r="6.5" stroke="currentColor" stroke-width="1.2"/>
+        <!-- Lüftungsschlitze unten -->
+        <line x1="8"  y1="21.5" x2="10" y2="21.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+        <line x1="11" y1="21.5" x2="13" y2="21.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+        <line x1="14" y1="21.5" x2="16" y2="21.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+        <!-- Trommel (rotiert) – Mitnehmerstäbe (Paddles) -->
+        <g style="${drumStyle}">
+          <circle cx="12" cy="14" r="4" stroke="currentColor" stroke-width="1"/>
+          <line x1="12"    y1="12"    x2="12"    y2="10.5"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="13.73" y1="15"    x2="15.03" y2="15.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10.27" y1="15"    x2="8.97"  y2="15.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </g>
+      </svg>`;
+
+    const machineIcon = cfg.machine_type === 'dryer' ? dryerSVG : washerSVG;
     const clickable  = (cfg.tap_action?.action ?? 'more-info') !== 'none';
 
     const key = [rawState, isOn, isRunning, powerWatts, JSON.stringify(cfg)].join('|');
@@ -184,31 +240,22 @@ class WasherCard extends HTMLElement {
         .main { display:flex; align-items:center; gap:16px; }
         .icon-wrap {
           flex-shrink:0;
-          width:62px; height:62px;
-          border-radius:50%;
+          width:72px; height:72px;
+          border-radius:14px;
           display:flex; align-items:center; justify-content:center;
           background:rgba(255,255,255,0.04);
           border:2px solid ${isOn ? stateColor + '55' : 'rgba(255,255,255,0.1)'};
           box-shadow:${isOn ? `0 0 12px 0 ${stateColor}2a` : 'none'};
           transition:border-color 0.3s, box-shadow 0.3s;
-          overflow:hidden;
-        }
-        ha-icon {
-          --mdc-icon-size:34px;
-          color:${isOn ? stateColor : 'rgba(255,255,255,0.3)'};
-          display:block;
-          transform-origin:center center;
-          transition:color 0.3s;
-          ${isRunning   ? 'animation:drum 3s linear infinite;' : ''}
           ${isFinished && !isRunning ? 'animation:finish-pop 0.5s ease-out 2 forwards;' : ''}
         }
-        @keyframes drum {
+        @keyframes drum-spin {
           from { transform:rotate(0deg); }
           to   { transform:rotate(360deg); }
         }
         @keyframes finish-pop {
           0%,100% { transform:scale(1); }
-          50%     { transform:scale(1.18); }
+          50%     { transform:scale(1.1); }
         }
         .details { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
         .name {
@@ -238,7 +285,7 @@ class WasherCard extends HTMLElement {
       <div class="card">
         <div class="main">
           <div class="icon-wrap">
-            <ha-icon icon="${icon}"></ha-icon>
+            ${machineIcon}
           </div>
           <div class="details">
             <div class="name">${name}</div>

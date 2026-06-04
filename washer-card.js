@@ -1,5 +1,5 @@
 // =====================================================================
-//  Washer Card v1.0.2
+//  Washer Card v1.0.3
 // =====================================================================
 
 const _WC_LABELS = {
@@ -67,30 +67,43 @@ class WasherCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._lastKey = null;
+    this._config     = {};
+    this._lastKey    = null;
+    this._popupOpen  = false;
+    this._popupEl    = null;
   }
 
   setConfig(config) {
     if (!config) throw new Error('Keine Konfiguration');
     this._config = {
-      machine_type: 'washer',
-      name: '',
-      show_power: true,
-      show_state: true,
-      active_states: _WC_DEFAULT_ACTIVE,
-      tap_action: { action: 'more-info' },
-      border_radius: 16,
+      machine_type:   'washer',
+      name:           '',
+      show_power:     true,
+      show_state:     true,
+      active_states:  _WC_DEFAULT_ACTIVE,
+      tap_action:     { action: 'more-info' },
+      border_radius:  16,
+      popup_controls: [],
       ...config,
     };
+    if (!Array.isArray(this._config.popup_controls)) this._config.popup_controls = [];
     delete this._lastKey;
   }
 
-  set hass(hass) { this._hass = hass; this._render(); }
+  set hass(hass) {
+    this._hass = hass;
+    // Wenn Popup offen: nur Controls aktualisieren, nicht ganzen render
+    if (this._popupOpen) {
+      this._refreshPopupControls();
+    } else {
+      this._render();
+    }
+  }
+
   getCardSize() { return 2; }
   static getConfigElement() { return document.createElement('washer-card-editor'); }
   static getStubConfig() {
-    return { machine_type: 'washer', name: 'Waschmaschine', tap_action: { action: 'more-info' } };
+    return { machine_type: 'washer', name: 'Waschmaschine', tap_action: { action: 'more-info' }, popup_controls: [] };
   }
 
   _activeSet() {
@@ -128,6 +141,149 @@ class WasherCard extends HTMLElement {
     }
   }
 
+  // ---- Popup öffnen / schließen ----
+
+  _openPopup() {
+    this._popupOpen = true;
+    if (!this._popupEl) {
+      this._popupEl = document.createElement('div');
+      this.shadowRoot.appendChild(this._popupEl);
+    }
+    this._popupEl.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+    this._buildPopupContent();
+  }
+
+  _closePopup() {
+    this._popupOpen = false;
+    if (this._popupEl) this._popupEl.style.display = 'none';
+    this._lastKey = null; // Card-Re-render beim nächsten hass-Update erzwingen
+  }
+
+  // Popup-Element nach shadowRoot.innerHTML-Reset wiederherstellen
+  _ensurePopup() {
+    if (!this._config.popup_controls?.length) return;
+    if (!this._popupEl) {
+      this._popupEl = document.createElement('div');
+    }
+    this.shadowRoot.appendChild(this._popupEl);
+    this._popupEl.style.cssText = `position:fixed;inset:0;z-index:9999;align-items:flex-end;justify-content:center;display:${this._popupOpen ? 'flex' : 'none'};`;
+    if (this._popupOpen) this._buildPopupContent();
+  }
+
+  // Nur Steuerelement-Zustände aktualisieren (ohne Popup neu zu bauen)
+  _refreshPopupControls() {
+    if (!this._popupEl || !this._hass) return;
+    (this._config.popup_controls || []).forEach((ctrl, i) => {
+      const st = this._hass.states[ctrl.entity];
+      if (!st) return;
+      if (ctrl.type === 'switch') {
+        const isOn = st.state === 'on';
+        const sw = this._popupEl.querySelector(`.wcsw[data-idx="${i}"]`);
+        if (sw) {
+          sw.style.background = isOn ? '#4CAF50' : 'rgba(255,255,255,0.15)';
+          const kn = sw.querySelector('.wckn');
+          if (kn) kn.style.left = isOn ? '23px' : '3px';
+        }
+      } else if (ctrl.type === 'select') {
+        const sel = this._popupEl.querySelector(`.wcslt[data-idx="${i}"]`);
+        if (sel && this._popupEl.ownerDocument.activeElement !== sel) sel.value = st.state;
+      }
+    });
+  }
+
+  // Popup-Inhalt vollständig neu aufbauen
+  _buildPopupContent() {
+    if (!this._popupEl || !this._hass) return;
+    const cfg = this._config;
+    const controls = cfg.popup_controls || [];
+    const name = cfg.name
+      || this._hass.states[cfg.entity]?.attributes?.friendly_name
+      || this._hass.states[cfg.state_entity]?.attributes?.friendly_name
+      || (cfg.machine_type === 'dryer' ? 'Trockner' : 'Waschmaschine');
+
+    this._popupEl.innerHTML = `
+      <div id="wcBD" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);cursor:pointer;"></div>
+      <div style="position:relative;width:100%;max-width:480px;background:rgba(18,18,28,0.97);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,0.12);border-radius:20px 20px 0 0;z-index:1;">
+        <!-- Handle -->
+        <div style="display:flex;justify-content:center;padding:12px 0 0;">
+          <div style="width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,0.2);"></div>
+        </div>
+        <!-- Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px 12px;">
+          <span style="font-size:16px;font-weight:700;color:rgba(255,255,255,0.92);">${name}</span>
+          <button id="wcCL" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:30px;height:30px;cursor:pointer;color:rgba(255,255,255,0.7);font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✕</button>
+        </div>
+        <!-- Controls -->
+        <div style="padding:0 18px 28px;display:flex;flex-direction:column;">
+          ${controls.length
+            ? controls.map((ctrl, i) => this._renderControl(ctrl, i)).join('')
+            : '<div style="color:rgba(255,255,255,0.35);font-size:13px;text-align:center;padding:20px 0;">Keine Steuerelemente konfiguriert</div>'
+          }
+        </div>
+      </div>
+    `;
+
+    this._popupEl.querySelector('#wcBD')?.addEventListener('click', () => this._closePopup());
+    this._popupEl.querySelector('#wcCL')?.addEventListener('click', () => this._closePopup());
+
+    // Switch-Toggles
+    this._popupEl.querySelectorAll('.wcsw').forEach(el => {
+      el.addEventListener('click', () => {
+        this._hass.callService('homeassistant', 'toggle', { entity_id: el.dataset.entity });
+      });
+    });
+
+    // Select-Dropdowns
+    this._popupEl.querySelectorAll('.wcslt').forEach(el => {
+      el.addEventListener('change', () => {
+        const [domain] = el.dataset.entity.split('.');
+        const svcDomain = domain === 'input_select' ? 'input_select' : 'select';
+        this._hass.callService(svcDomain, 'select_option', { entity_id: el.dataset.entity, option: el.value });
+      });
+    });
+  }
+
+  _renderControl(ctrl, i) {
+    const st    = this._hass?.states[ctrl.entity];
+    const label = ctrl.label || st?.attributes?.friendly_name || ctrl.entity || '–';
+    const icon  = st?.attributes?.icon || (ctrl.type === 'switch' ? 'mdi:toggle-switch' : 'mdi:format-list-bulleted');
+    const sep   = 'border-bottom:1px solid rgba(255,255,255,0.07);';
+
+    if (ctrl.type === 'switch') {
+      const isOn  = st?.state === 'on';
+      const color = isOn ? '#4CAF50' : 'rgba(255,255,255,0.35)';
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 0;${sep}">
+          <div style="display:flex;align-items:center;gap:13px;">
+            <ha-icon icon="${icon}" style="--mdc-icon-size:22px;color:${color};flex-shrink:0;"></ha-icon>
+            <span style="font-size:14px;font-weight:500;color:rgba(255,255,255,0.88);">${label}</span>
+          </div>
+          <div class="wcsw" data-entity="${ctrl.entity}" data-idx="${i}"
+               style="width:48px;height:27px;border-radius:14px;background:${isOn ? '#4CAF50' : 'rgba(255,255,255,0.15)'};position:relative;cursor:pointer;flex-shrink:0;transition:background 0.2s;">
+            <div class="wckn" style="position:absolute;top:3px;left:${isOn ? '23px' : '3px'};width:21px;height:21px;border-radius:50%;background:#fff;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
+          </div>
+        </div>`;
+    }
+
+    if (ctrl.type === 'select') {
+      const options = st?.attributes?.options || [];
+      const current = st?.state || '';
+      return `
+        <div style="padding:15px 0;${sep}">
+          <div style="display:flex;align-items:center;gap:13px;margin-bottom:10px;">
+            <ha-icon icon="${icon}" style="--mdc-icon-size:22px;color:rgba(255,255,255,0.6);flex-shrink:0;"></ha-icon>
+            <span style="font-size:14px;font-weight:500;color:rgba(255,255,255,0.88);">${label}</span>
+          </div>
+          <select class="wcslt" data-entity="${ctrl.entity}" data-idx="${i}"
+                  style="width:100%;padding:10px 36px 10px 12px;border-radius:10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;font-size:13px;outline:none;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><path fill=%22rgba(255,255,255,0.5)%22 d=%22M7 10l5 5 5-5z%22/></svg>');background-repeat:no-repeat;background-position:right 8px center;background-size:22px;box-sizing:border-box;">
+            ${options.map(o => `<option value="${o}" style="background:#1a1a2e;color:#fff;" ${o === current ? 'selected' : ''}>${o}</option>`).join('')}
+          </select>
+        </div>`;
+    }
+
+    return '';
+  }
+
   _render() {
     if (!this._hass) return;
     const cfg = this._config;
@@ -138,7 +294,6 @@ class WasherCard extends HTMLElement {
 
     const rawState = stateSt?.state ?? mainSt?.state ?? null;
 
-    // isOn: von Haupt-Entität ableiten, sonst aus State-Entität
     let isOn;
     if (mainSt) {
       isOn = !['off', 'unavailable', 'unknown'].includes(mainSt.state);
@@ -158,54 +313,48 @@ class WasherCard extends HTMLElement {
       || stateSt?.attributes?.friendly_name
       || (cfg.machine_type === 'dryer' ? 'Trockner' : 'Waschmaschine');
     const br         = cfg.border_radius ?? 16;
+    const hasPopup   = cfg.popup_controls?.length > 0;
+    const clickable  = hasPopup || (cfg.tap_action?.action ?? 'more-info') !== 'none';
 
-    const iconColor  = isOn ? stateColor : 'rgba(255,255,255,0.3)';
-    const drumStyle  = `transform-box:fill-box;transform-origin:center;${isRunning ? 'animation:drum-spin 3s linear infinite;' : ''}`;
+    const popupStates = (cfg.popup_controls || [])
+      .map(c => `${c.entity}:${this._hass.states[c.entity]?.state}`).join(',');
 
-    // Waschmaschine: Gehäuse + Bullaugen-Trommel
+    const key = [rawState, isOn, isRunning, powerWatts, popupStates, JSON.stringify(cfg)].join('|');
+    if (key === this._lastKey) return;
+    this._lastKey = key;
+
+    const iconColor = isOn ? stateColor : 'rgba(255,255,255,0.3)';
+    const drumStyle = `transform-box:fill-box;transform-origin:center;${isRunning ? 'animation:drum-spin 3s linear infinite;' : ''}`;
+
     const washerSVG = `
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
            style="width:52px;height:52px;color:${iconColor};">
-        <!-- Gehäuse -->
         <rect x="1" y="1" width="22" height="22" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
-        <!-- Bedienfeld-Trennlinie -->
         <line x1="1" y1="6.5" x2="23" y2="6.5" stroke="currentColor" stroke-width="1"/>
-        <!-- Tasten links -->
         <circle cx="4"   cy="3.8" r="1.2" fill="currentColor"/>
         <circle cx="7.5" cy="3.8" r="1.2" fill="currentColor"/>
-        <!-- Ein/Aus-Knopf rechts -->
-        <circle cx="20" cy="3.8" r="1.8" stroke="currentColor" stroke-width="1"/>
-        <!-- Türring (statisch) -->
+        <circle cx="20"  cy="3.8" r="1.8" stroke="currentColor" stroke-width="1"/>
         <circle cx="12" cy="14" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-        <!-- Trommel (rotiert) -->
         <g style="${drumStyle}">
           <circle cx="12" cy="14" r="4" stroke="currentColor" stroke-width="1"/>
-          <circle cx="12"  cy="11.2" r="0.9" fill="currentColor"/>
+          <circle cx="12"   cy="11.2" r="0.9" fill="currentColor"/>
           <circle cx="14.4" cy="15.4" r="0.9" fill="currentColor"/>
           <circle cx="9.6"  cy="15.4" r="0.9" fill="currentColor"/>
         </g>
       </svg>`;
 
-    // Trockner: Gehäuse + Mitnehmer-Paddle-Trommel + Lüftungsschlitze
     const dryerSVG = `
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
            style="width:52px;height:52px;color:${iconColor};">
-        <!-- Gehäuse -->
         <rect x="1" y="1" width="22" height="22" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
-        <!-- Bedienfeld-Trennlinie -->
         <line x1="1" y1="6.5" x2="23" y2="6.5" stroke="currentColor" stroke-width="1"/>
-        <!-- Taste links -->
         <circle cx="4.5" cy="3.8" r="1.2" fill="currentColor"/>
-        <!-- Drehregler rechts -->
-        <circle cx="19" cy="3.8" r="2"  stroke="currentColor" stroke-width="1"/>
+        <circle cx="19"  cy="3.8" r="2"   stroke="currentColor" stroke-width="1"/>
         <line x1="19" y1="3.8" x2="19" y2="1.9" stroke="currentColor" stroke-width="0.9" stroke-linecap="round"/>
-        <!-- Türring (statisch) -->
         <circle cx="12" cy="14" r="6.5" stroke="currentColor" stroke-width="1.2"/>
-        <!-- Lüftungsschlitze unten -->
         <line x1="8"  y1="21.5" x2="10" y2="21.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         <line x1="11" y1="21.5" x2="13" y2="21.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
         <line x1="14" y1="21.5" x2="16" y2="21.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
-        <!-- Trommel (rotiert) – Mitnehmerstäbe (Paddles) -->
         <g style="${drumStyle}">
           <circle cx="12" cy="14" r="4" stroke="currentColor" stroke-width="1"/>
           <line x1="12"    y1="12"    x2="12"    y2="10.5"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -215,11 +364,6 @@ class WasherCard extends HTMLElement {
       </svg>`;
 
     const machineIcon = cfg.machine_type === 'dryer' ? dryerSVG : washerSVG;
-    const clickable  = (cfg.tap_action?.action ?? 'more-info') !== 'none';
-
-    const key = [rawState, isOn, isRunning, powerWatts, JSON.stringify(cfg)].join('|');
-    if (key === this._lastKey) return;
-    this._lastKey = key;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -239,9 +383,7 @@ class WasherCard extends HTMLElement {
         .card:active { background:rgba(255,255,255,0.1); }
         .main { display:flex; align-items:center; gap:16px; }
         .icon-wrap {
-          flex-shrink:0;
-          width:72px; height:72px;
-          border-radius:14px;
+          flex-shrink:0; width:72px; height:72px; border-radius:14px;
           display:flex; align-items:center; justify-content:center;
           background:rgba(255,255,255,0.04);
           border:2px solid ${isOn ? stateColor + '55' : 'rgba(255,255,255,0.1)'};
@@ -249,19 +391,10 @@ class WasherCard extends HTMLElement {
           transition:border-color 0.3s, box-shadow 0.3s;
           ${isFinished && !isRunning ? 'animation:finish-pop 0.5s ease-out 2 forwards;' : ''}
         }
-        @keyframes drum-spin {
-          from { transform:rotate(0deg); }
-          to   { transform:rotate(360deg); }
-        }
-        @keyframes finish-pop {
-          0%,100% { transform:scale(1); }
-          50%     { transform:scale(1.1); }
-        }
+        @keyframes drum-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+        @keyframes finish-pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
         .details { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
-        .name {
-          font-size:14px; font-weight:600; color:rgba(255,255,255,0.9);
-          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        }
+        .name { font-size:14px; font-weight:600; color:rgba(255,255,255,0.9); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .state-row { display:flex; align-items:center; gap:7px; }
         .dot {
           width:7px; height:7px; border-radius:50%; flex-shrink:0;
@@ -277,16 +410,12 @@ class WasherCard extends HTMLElement {
           color:${isOn ? stateColor : 'rgba(255,255,255,0.3)'};
           border:1px solid ${isOn ? stateColor + '44' : 'rgba(255,255,255,0.08)'};
         }
-        .power {
-          font-size:12px; font-weight:700; font-variant-numeric:tabular-nums;
-          color:${powerWatts !== null && powerWatts > 5 ? stateColor : 'rgba(255,255,255,0.3)'};
-        }
+        .power { font-size:12px; font-weight:700; font-variant-numeric:tabular-nums; color:${powerWatts !== null && powerWatts > 5 ? stateColor : 'rgba(255,255,255,0.3)'}; }
+        ${hasPopup ? `.popup-hint { font-size:10px; color:rgba(255,255,255,0.25); margin-top:2px; }` : ''}
       </style>
       <div class="card">
         <div class="main">
-          <div class="icon-wrap">
-            ${machineIcon}
-          </div>
+          <div class="icon-wrap">${machineIcon}</div>
           <div class="details">
             <div class="name">${name}</div>
             ${cfg.show_state !== false ? `
@@ -299,14 +428,20 @@ class WasherCard extends HTMLElement {
               ${cfg.show_power !== false && powerWatts !== null
                 ? `<span class="power">${_wcFmtPower(powerWatts)}</span>` : ''}
             </div>
+            ${hasPopup ? `<span class="popup-hint">Tippen für Steuerung</span>` : ''}
           </div>
         </div>
       </div>
     `;
 
-    if (clickable) {
+    if (hasPopup) {
+      this.shadowRoot.querySelector('.card').addEventListener('click', () => this._openPopup());
+    } else if (clickable) {
       this.shadowRoot.querySelector('.card').addEventListener('click', () => this._handleTap());
     }
+
+    // Popup-Element nach innerHTML-Reset wiederherstellen
+    this._ensurePopup();
   }
 }
 
@@ -319,13 +454,14 @@ class WasherCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._config  = {};
-    this._hass    = null;
+    this._config   = {};
+    this._hass     = null;
     this._rendered = false;
   }
 
   setConfig(config) {
     this._config = { ...config };
+    if (!Array.isArray(this._config.popup_controls)) this._config.popup_controls = [];
     if (this._rendered) {
       this._syncFields();
     } else {
@@ -340,10 +476,10 @@ class WasherCardEditor extends HTMLElement {
     } else {
       const root   = this.shadowRoot;
       const active = root.activeElement;
-      const fields = root.getElementById('entityFields');
-      if (!active || !fields || !fields.contains(active)) {
-        this._rebuildEntityFields();
-      }
+      const ef     = root.getElementById('entityFields');
+      const pc     = root.getElementById('popupControlsList');
+      if (!active || !ef || !ef.contains(active)) this._rebuildEntityFields();
+      if (!active || !pc || !pc.contains(active)) this._updatePopupControls();
     }
   }
 
@@ -371,10 +507,8 @@ class WasherCardEditor extends HTMLElement {
 
     const nameEl = root.getElementById('name');
     if (nameEl && active !== nameEl) nameEl.value = c.name || '';
-
     const asEl = root.getElementById('active_states');
     if (asEl && active !== asEl) asEl.value = c.active_states || _WC_DEFAULT_ACTIVE;
-
     this._updateActionFields();
   }
 
@@ -392,7 +526,6 @@ class WasherCardEditor extends HTMLElement {
 
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:relative;';
-
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;border:1px solid var(--divider-color,#e0e0e0);border-radius:8px;background:var(--card-background-color,#fff);overflow:hidden;';
 
@@ -413,9 +546,7 @@ class WasherCardEditor extends HTMLElement {
       this._config = cfg;
       this._emit();
     });
-
-    row.appendChild(input);
-    row.appendChild(clrBtn);
+    row.appendChild(input); row.appendChild(clrBtn);
 
     const dropdown = document.createElement('div');
     dropdown.style.cssText = 'position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e0e0e0);border-radius:8px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.15);display:none;margin-top:2px;';
@@ -460,15 +591,14 @@ class WasherCardEditor extends HTMLElement {
       this._emit();
     });
 
-    wrap.appendChild(row);
-    wrap.appendChild(dropdown);
+    wrap.appendChild(row); wrap.appendChild(dropdown);
     container.appendChild(wrap);
   }
 
   _rebuildEntityFields() {
-    this._buildEntityField('field_entity',       'Haupt-Entität (An / Aus)',    'entity');
-    this._buildEntityField('field_state_entity', 'Programm-Sensor (optional)',  'state_entity');
-    this._buildEntityField('field_power_entity', 'Leistungssensor (optional)',  'power_entity');
+    this._buildEntityField('field_entity',       'Haupt-Entität (An / Aus)',   'entity');
+    this._buildEntityField('field_state_entity', 'Programm-Sensor (optional)', 'state_entity');
+    this._buildEntityField('field_power_entity', 'Leistungssensor (optional)', 'power_entity');
   }
 
   _updateActionFields() {
@@ -480,6 +610,130 @@ class WasherCardEditor extends HTMLElement {
     if (navF) navF.style.display = action === 'navigate'     ? '' : 'none';
     if (svcF) svcF.style.display = action === 'call-service' ? '' : 'none';
     if (urlF) urlF.style.display = action === 'url'          ? '' : 'none';
+  }
+
+  // ---- Popup-Controls Liste ----
+  _updatePopupControls() {
+    const container = this.shadowRoot.getElementById('popupControlsList');
+    if (!container) return;
+    const active = this.shadowRoot.activeElement;
+    if (active && container.contains(active)) return; // Fokus-Schutz
+
+    container.innerHTML = '';
+    const controls = this._config.popup_controls || [];
+
+    if (controls.length === 0) {
+      const msg = document.createElement('div');
+      msg.style.cssText = 'font-size:12px;color:var(--secondary-text-color,#888);padding:4px 0;';
+      msg.textContent = 'Noch keine Steuerelemente hinzugefügt.';
+      container.appendChild(msg);
+      return;
+    }
+
+    controls.forEach((ctrl, i) => {
+      const st = this._hass?.states[ctrl.entity];
+      const fn = st?.attributes?.friendly_name || ctrl.entity || '';
+
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:8px;border-radius:8px;background:var(--secondary-background-color,#f5f5f5);margin-bottom:6px;flex-wrap:wrap;';
+
+      // Typ-Auswahl
+      const typeSel = document.createElement('select');
+      typeSel.style.cssText = 'padding:7px 8px;border-radius:6px;border:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);font-size:12px;color:var(--primary-text-color,#212121);flex-shrink:0;cursor:pointer;';
+      typeSel.innerHTML = `<option value="switch" ${ctrl.type==='switch'?'selected':''}>Switch</option><option value="select" ${ctrl.type==='select'?'selected':''}>Select</option>`;
+      typeSel.addEventListener('change', () => {
+        const ctrls = [...(this._config.popup_controls || [])];
+        ctrls[i] = { ...ctrls[i], type: typeSel.value };
+        this._config = { ...this._config, popup_controls: ctrls };
+        this._emit();
+        this._updatePopupControls();
+      });
+
+      // Entity-Input mit Autocomplete
+      const eWrap = document.createElement('div');
+      eWrap.style.cssText = 'position:relative;flex:1;min-width:120px;';
+
+      const eInput = document.createElement('input');
+      eInput.type = 'text';
+      eInput.value = ctrl.entity || '';
+      eInput.placeholder = 'entity_id…';
+      eInput.style.cssText = 'width:100%;padding:7px 8px;border-radius:6px;border:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);font-size:12px;color:var(--primary-text-color,#212121);box-sizing:border-box;outline:none;';
+
+      const eDrop = document.createElement('div');
+      eDrop.style.cssText = 'position:absolute;top:100%;left:0;right:0;max-height:160px;overflow-y:auto;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e0e0e0);border-radius:6px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:none;margin-top:2px;';
+
+      const showEDrop = (filter) => {
+        eDrop.innerHTML = '';
+        if (!this._hass || !filter.trim()) { eDrop.style.display = 'none'; return; }
+        const lower = filter.toLowerCase();
+        const matches = Object.keys(this._hass.states)
+          .filter(id => {
+            const f = (this._hass.states[id]?.attributes?.friendly_name || '').toLowerCase();
+            return id.toLowerCase().includes(lower) || f.includes(lower);
+          }).slice(0, 6);
+        if (!matches.length) { eDrop.style.display = 'none'; return; }
+        matches.forEach(id => {
+          const f    = this._hass.states[id]?.attributes?.friendly_name || id;
+          const item = document.createElement('div');
+          item.style.cssText = 'padding:6px 9px;cursor:pointer;border-bottom:1px solid var(--divider-color,#f0f0f0);';
+          item.innerHTML = `<div style="font-size:11px;font-weight:500;">${f}</div><div style="font-size:10px;color:var(--secondary-text-color,#727272);">${id}</div>`;
+          item.addEventListener('mouseover', () => { item.style.background = 'var(--secondary-background-color,#f5f5f5)'; });
+          item.addEventListener('mouseout',  () => { item.style.background = ''; });
+          item.addEventListener('mousedown', ev => {
+            ev.preventDefault();
+            eInput.value = id;
+            eDrop.style.display = 'none';
+            const ctrls = [...(this._config.popup_controls || [])];
+            ctrls[i] = { ...ctrls[i], entity: id };
+            this._config = { ...this._config, popup_controls: ctrls };
+            this._emit();
+          });
+          eDrop.appendChild(item);
+        });
+        eDrop.style.display = 'block';
+      };
+
+      eInput.addEventListener('input',  () => showEDrop(eInput.value));
+      eInput.addEventListener('focus',  () => showEDrop(eInput.value));
+      eInput.addEventListener('blur',   () => setTimeout(() => { eDrop.style.display = 'none'; }, 150));
+      eInput.addEventListener('change', () => {
+        const ctrls = [...(this._config.popup_controls || [])];
+        ctrls[i] = { ...ctrls[i], entity: eInput.value.trim() };
+        this._config = { ...this._config, popup_controls: ctrls };
+        this._emit();
+      });
+
+      eWrap.appendChild(eInput); eWrap.appendChild(eDrop);
+
+      // Bezeichnung-Input
+      const lInput = document.createElement('input');
+      lInput.type = 'text';
+      lInput.value = ctrl.label || '';
+      lInput.placeholder = fn || 'Bezeichnung…';
+      lInput.style.cssText = 'flex:1;min-width:80px;padding:7px 8px;border-radius:6px;border:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);font-size:12px;color:var(--primary-text-color,#212121);box-sizing:border-box;outline:none;';
+      lInput.addEventListener('change', () => {
+        const ctrls = [...(this._config.popup_controls || [])];
+        ctrls[i] = { ...ctrls[i], label: lInput.value.trim() || undefined };
+        this._config = { ...this._config, popup_controls: ctrls };
+        this._emit();
+      });
+
+      // Entfernen-Button
+      const rmBtn = document.createElement('button');
+      rmBtn.textContent = '×';
+      rmBtn.title = 'Entfernen';
+      rmBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--error-color,#f44336);font-size:18px;padding:0 2px;line-height:1;flex-shrink:0;align-self:center;';
+      rmBtn.addEventListener('click', () => {
+        const ctrls = [...(this._config.popup_controls || [])];
+        ctrls.splice(i, 1);
+        this._config = { ...this._config, popup_controls: ctrls };
+        this._emit();
+        this._updatePopupControls();
+      });
+
+      row.appendChild(typeSel); row.appendChild(eWrap); row.appendChild(lInput); row.appendChild(rmBtn);
+      container.appendChild(row);
+    });
   }
 
   _render() {
@@ -517,24 +771,26 @@ class WasherCardEditor extends HTMLElement {
           transition:all 0.15s;
         }
         .type-btn ha-icon { --mdc-icon-size:30px; }
-        .type-btn.selected {
-          background:var(--primary-color,#03a9f4);
-          color:#fff; border-color:var(--primary-color,#03a9f4);
-        }
+        .type-btn.selected { background:var(--primary-color,#03a9f4); color:#fff; border-color:var(--primary-color,#03a9f4); }
         #entityFields { display:flex; flex-direction:column; gap:14px; }
         textarea { resize:vertical; min-height:56px; }
+        .add-btn {
+          width:100%; padding:9px 14px; border-radius:8px; border:1px dashed var(--divider-color,#ccc);
+          background:transparent; cursor:pointer; color:var(--primary-color,#03a9f4);
+          font-size:13px; font-weight:500; display:flex; align-items:center; justify-content:center; gap:6px;
+        }
+        .add-btn:hover { background:var(--secondary-background-color,#f5f5f5); }
+        #popupControlsList { display:flex; flex-direction:column; }
       </style>
       <div class="editor">
 
         <div class="section">Gerätetyp</div>
         <div class="type-buttons" id="typeBtns">
           <button class="type-btn ${(c.machine_type||'washer')==='washer'?'selected':''}" data-type="washer">
-            <ha-icon icon="mdi:washing-machine"></ha-icon>
-            Waschmaschine
+            <ha-icon icon="mdi:washing-machine"></ha-icon>Waschmaschine
           </button>
           <button class="type-btn ${c.machine_type==='dryer'?'selected':''}" data-type="dryer">
-            <ha-icon icon="mdi:tumble-dryer"></ha-icon>
-            Trockner
+            <ha-icon icon="mdi:tumble-dryer"></ha-icon>Trockner
           </button>
         </div>
 
@@ -548,20 +804,25 @@ class WasherCardEditor extends HTMLElement {
           <div class="field" id="field_state_entity"></div>
           <div class="field" id="field_power_entity"></div>
         </div>
-        <div class="hint">
-          Die Haupt-Entität bestimmt An/Aus. Der Programm-Sensor zeigt den aktuellen Waschgang und steuert die Drehaniation.
-          Ist nur der Programm-Sensor gesetzt, wird An/Aus automatisch daraus abgeleitet.
-        </div>
+        <div class="hint">Die Haupt-Entität bestimmt An/Aus. Der Programm-Sensor zeigt den Waschgang und steuert die Animation.</div>
+
+        <div class="section">Popup-Steuerung</div>
+        <div class="hint">Beim Antippen der Karte erscheint ein Popup mit diesen Bedienelementen. Switch = An/Aus-Schalter, Select = Auswahlliste (z.&nbsp;B. Schleudergang).</div>
+        <div id="popupControlsList"></div>
+        <button class="add-btn" id="addPopupCtrl">
+          <ha-icon icon="mdi:plus" style="--mdc-icon-size:18px;"></ha-icon>
+          Steuerung hinzufügen
+        </button>
 
         <div class="section">Zustände</div>
         <div class="field">
           <label>Aktive Zustände (Icon dreht sich)</label>
           <textarea id="active_states" rows="3">${c.active_states || _WC_DEFAULT_ACTIVE}</textarea>
-          <span class="hint">Kommagetrennte Zustandsnamen – in diesen Zuständen dreht sich das Icon.<br>
-          Samsung-Beispiele: wash, pre_wash, rinse, spin, drying, ai_wash, ai_rinse, ai_spin, air_wash, weight_sensing, cooling, wrinkle_prevent</span>
+          <span class="hint">Kommagetrennte Zustandsnamen – in diesen Zuständen dreht sich das Icon.</span>
         </div>
 
-        <div class="section">Aktion bei Tippen</div>
+        <div class="section">Aktion bei Tippen (ohne Popup)</div>
+        <div class="hint">Wird verwendet wenn kein Popup konfiguriert ist.</div>
         <div class="field">
           <select id="tap_action_type">
             <option value="more-info"    ${ta.action==='more-info'    ?'selected':''}>Mehr Infos anzeigen</option>
@@ -602,10 +863,9 @@ class WasherCardEditor extends HTMLElement {
       </div>
     `;
 
-    // Entity-Felder aufbauen
     this._rebuildEntityFields();
+    this._updatePopupControls();
 
-    // Gerätetyp-Buttons
     root.getElementById('typeBtns').addEventListener('click', e => {
       const btn = e.target.closest('[data-type]');
       if (!btn) return;
@@ -614,19 +874,22 @@ class WasherCardEditor extends HTMLElement {
       this._config = { ...this._config, machine_type: type };
       this._emit();
     });
-
     root.getElementById('name').addEventListener('change', e => {
       this._config = { ...this._config, name: e.target.value }; this._emit();
     });
     root.getElementById('active_states').addEventListener('change', e => {
       this._config = { ...this._config, active_states: e.target.value }; this._emit();
     });
-
-    // Tap-Action
+    root.getElementById('addPopupCtrl').addEventListener('click', () => {
+      const ctrls = [...(this._config.popup_controls || [])];
+      ctrls.push({ type: 'switch', entity: '' });
+      this._config = { ...this._config, popup_controls: ctrls };
+      this._emit();
+      this._updatePopupControls();
+    });
     root.getElementById('tap_action_type').addEventListener('change', e => {
       this._config = { ...this._config, tap_action: { ...this._config.tap_action, action: e.target.value } };
-      this._emit();
-      this._updateActionFields();
+      this._emit(); this._updateActionFields();
     });
     root.getElementById('nav_path').addEventListener('change', e => {
       this._config = { ...this._config, tap_action: { ...this._config.tap_action, navigation_path: e.target.value } }; this._emit();
@@ -637,8 +900,6 @@ class WasherCardEditor extends HTMLElement {
     root.getElementById('url_path').addEventListener('change', e => {
       this._config = { ...this._config, tap_action: { ...this._config.tap_action, url_path: e.target.value } }; this._emit();
     });
-
-    // Darstellung
     root.getElementById('show_state').addEventListener('change', e => {
       this._config = { ...this._config, show_state: e.target.checked }; this._emit();
     });
@@ -657,6 +918,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'washer-card',
   name: 'Washer Card',
-  description: 'Waschmaschinen- & Trockner-Widget mit dynamischer Drehanimation, Statusanzeige und Leistungsanzeige',
+  description: 'Waschmaschinen- & Trockner-Widget mit Drehanimation, Statusanzeige, Popup-Steuerung (Switch/Select)',
   preview: true,
 });

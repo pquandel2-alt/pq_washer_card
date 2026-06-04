@@ -1,5 +1,5 @@
 // =====================================================================
-//  Washer Card v1.0.3
+//  Washer Card v1.0.4
 // =====================================================================
 
 const _WC_LABELS = {
@@ -184,6 +184,22 @@ class WasherCard extends HTMLElement {
           const kn = sw.querySelector('.wckn');
           if (kn) kn.style.left = isOn ? '23px' : '3px';
         }
+      } else if (ctrl.type === 'number') {
+        const sld = this._popupEl.querySelector(`.wcsld[data-idx="${i}"]`);
+        const nv  = this._popupEl.querySelector(`.wcnv[data-idx="${i}"]`);
+        if (sld && this._popupEl.ownerDocument.activeElement !== sld) {
+          const val = parseFloat(st.state);
+          const min = parseFloat(sld.min);
+          const max = parseFloat(sld.max);
+          sld.value = isNaN(val) ? min : val;
+          const pct = ((val - min) / (max - min) * 100).toFixed(1);
+          sld.style.background = `linear-gradient(to right,#42A5F5 ${pct}%,rgba(255,255,255,0.18) ${pct}%)`;
+          if (nv) {
+            const dec  = parseInt(sld.dataset.dec || '0');
+            const unit = sld.dataset.unit || '';
+            nv.textContent = (isNaN(val) ? '–' : val.toFixed(dec)) + (unit ? ' ' + unit : '');
+          }
+        }
       } else if (ctrl.type === 'select') {
         const sel = this._popupEl.querySelector(`.wcslt[data-idx="${i}"]`);
         if (sel && this._popupEl.ownerDocument.activeElement !== sel) sel.value = st.state;
@@ -233,6 +249,27 @@ class WasherCard extends HTMLElement {
       });
     });
 
+    // Number-Slider
+    this._popupEl.querySelectorAll('.wcsld').forEach(el => {
+      const updateSlider = () => {
+        const min  = parseFloat(el.min);
+        const max  = parseFloat(el.max);
+        const val  = parseFloat(el.value);
+        const pct  = ((val - min) / (max - min) * 100).toFixed(1);
+        el.style.background = `linear-gradient(to right,#42A5F5 ${pct}%,rgba(255,255,255,0.18) ${pct}%)`;
+        const dec  = parseInt(el.dataset.dec || '0');
+        const unit = el.dataset.unit || '';
+        const nv   = this._popupEl.querySelector(`.wcnv[data-idx="${el.dataset.idx}"]`);
+        if (nv) nv.textContent = val.toFixed(dec) + (unit ? ' ' + unit : '');
+      };
+      el.addEventListener('input', updateSlider);
+      el.addEventListener('change', () => {
+        const [domain] = el.dataset.entity.split('.');
+        const svcDomain = domain === 'input_number' ? 'input_number' : 'number';
+        this._hass.callService(svcDomain, 'set_value', { entity_id: el.dataset.entity, value: parseFloat(el.value) });
+      });
+    });
+
     // Select-Dropdowns
     this._popupEl.querySelectorAll('.wcslt').forEach(el => {
       el.addEventListener('change', () => {
@@ -262,6 +299,29 @@ class WasherCard extends HTMLElement {
                style="width:48px;height:27px;border-radius:14px;background:${isOn ? '#4CAF50' : 'rgba(255,255,255,0.15)'};position:relative;cursor:pointer;flex-shrink:0;transition:background 0.2s;">
             <div class="wckn" style="position:absolute;top:3px;left:${isOn ? '23px' : '3px'};width:21px;height:21px;border-radius:50%;background:#fff;transition:left 0.2s;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>
           </div>
+        </div>`;
+    }
+
+    if (ctrl.type === 'number') {
+      const min   = parseFloat(st?.attributes?.min  ?? 0);
+      const max   = parseFloat(st?.attributes?.max  ?? 100);
+      const step  = parseFloat(st?.attributes?.step ?? 1);
+      const unit  = st?.attributes?.unit_of_measurement || '';
+      const cur   = parseFloat(st?.state ?? min);
+      const pct   = isNaN(cur) ? 0 : ((cur - min) / (max - min) * 100).toFixed(1);
+      const dec   = step < 1 ? (String(step).split('.')[1]?.length || 1) : 0;
+      const disp  = isNaN(cur) ? '–' : cur.toFixed(dec) + (unit ? ' ' + unit : '');
+      return `
+        <div style="padding:15px 0;${sep}">
+          <div style="display:flex;align-items:center;gap:13px;margin-bottom:14px;">
+            <ha-icon icon="${icon}" style="--mdc-icon-size:22px;color:rgba(255,255,255,0.6);flex-shrink:0;"></ha-icon>
+            <span style="font-size:14px;font-weight:500;color:rgba(255,255,255,0.88);">${label}</span>
+            <span class="wcnv" data-idx="${i}" style="margin-left:auto;font-size:14px;font-weight:700;color:#42A5F5;white-space:nowrap;flex-shrink:0;">${disp}</span>
+          </div>
+          <input type="range" class="wcsld" data-entity="${ctrl.entity}" data-idx="${i}"
+                 data-unit="${unit}" data-dec="${dec}"
+                 min="${min}" max="${max}" step="${step}" value="${isNaN(cur) ? min : cur}"
+                 style="width:100%;height:5px;-webkit-appearance:none;appearance:none;border-radius:3px;outline:none;cursor:pointer;accent-color:#42A5F5;background:linear-gradient(to right,#42A5F5 ${pct}%,rgba(255,255,255,0.18) ${pct}%);">
         </div>`;
     }
 
@@ -640,7 +700,7 @@ class WasherCardEditor extends HTMLElement {
       // Typ-Auswahl
       const typeSel = document.createElement('select');
       typeSel.style.cssText = 'padding:7px 8px;border-radius:6px;border:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);font-size:12px;color:var(--primary-text-color,#212121);flex-shrink:0;cursor:pointer;';
-      typeSel.innerHTML = `<option value="switch" ${ctrl.type==='switch'?'selected':''}>Switch</option><option value="select" ${ctrl.type==='select'?'selected':''}>Select</option>`;
+      typeSel.innerHTML = `<option value="switch" ${ctrl.type==='switch'?'selected':''}>Switch</option><option value="select" ${ctrl.type==='select'?'selected':''}>Select</option><option value="number" ${ctrl.type==='number'?'selected':''}>Number</option>`;
       typeSel.addEventListener('change', () => {
         const ctrls = [...(this._config.popup_controls || [])];
         ctrls[i] = { ...ctrls[i], type: typeSel.value };

@@ -1,5 +1,5 @@
 // =====================================================================
-//  Washer Card v1.0.5
+//  Washer Card v1.0.6
 // =====================================================================
 
 const _WC_LABELS = {
@@ -521,14 +521,7 @@ class WasherCard extends HTMLElement {
         <div class="main">
           <div class="icon-wrap">${machineIcon}</div>
           <div class="details">
-            <div class="name-row">
-              <div class="name">${name}</div>
-              ${timerDisp ? `
-                <div class="timer-badge">
-                  <ha-icon icon="mdi:timer-outline"></ha-icon>
-                  ${timerDisp}
-                </div>` : ''}
-            </div>
+            <div class="name">${name}</div>
             ${cfg.show_state !== false ? `
               <div class="state-row">
                 <div class="dot"></div>
@@ -536,8 +529,15 @@ class WasherCard extends HTMLElement {
               </div>` : ''}
             <div class="bottom-row">
               <span class="on-badge">${isOn ? 'An' : 'Aus'}</span>
-              ${cfg.show_power !== false && powerWatts !== null
-                ? `<span class="power">${_wcFmtPower(powerWatts)}</span>` : ''}
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${cfg.show_power !== false && powerWatts !== null
+                  ? `<span class="power">${_wcFmtPower(powerWatts)}</span>` : ''}
+                ${timerDisp ? `
+                  <div class="timer-badge">
+                    <ha-icon icon="mdi:timer-outline"></ha-icon>
+                    ${timerDisp}
+                  </div>` : ''}
+              </div>
             </div>
             ${hasPopup ? `<span class="popup-hint">Tippen für Steuerung</span>` : ''}
           </div>

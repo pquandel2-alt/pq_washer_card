@@ -1,3 +1,4 @@
+// @ts-check
 // =====================================================================
 //  Washer Card v1.0.6
 // =====================================================================
@@ -103,6 +104,7 @@ class WasherCard extends HTMLElement {
     this._popupEl    = null;
   }
 
+  /** @param {LovelaceCardConfig} config */
   setConfig(config) {
     if (!config) throw new Error('Keine Konfiguration');
     this._config = {
@@ -121,6 +123,7 @@ class WasherCard extends HTMLElement {
     delete this._lastKey;
   }
 
+  /** @param {HomeAssistant} hass */
   set hass(hass) {
     this._hass = hass;
     // Wenn Popup offen: nur Controls aktualisieren, nicht ganzen render
@@ -209,20 +212,20 @@ class WasherCard extends HTMLElement {
       if (!st) return;
       if (ctrl.type === 'switch') {
         const isOn = st.state === 'on';
-        const sw = this._popupEl.querySelector(`.wcsw[data-idx="${i}"]`);
+        const sw = /** @type {HTMLElement|null} */ (this._popupEl.querySelector(`.wcsw[data-idx="${i}"]`));
         if (sw) {
           sw.style.background = isOn ? '#4CAF50' : 'rgba(255,255,255,0.15)';
-          const kn = sw.querySelector('.wckn');
+          const kn = /** @type {HTMLElement|null} */ (sw.querySelector('.wckn'));
           if (kn) kn.style.left = isOn ? '23px' : '3px';
         }
       } else if (ctrl.type === 'number') {
-        const sld = this._popupEl.querySelector(`.wcsld[data-idx="${i}"]`);
-        const nv  = this._popupEl.querySelector(`.wcnv[data-idx="${i}"]`);
+        const sld = /** @type {HTMLInputElement & HTMLElement|null} */ (this._popupEl.querySelector(`.wcsld[data-idx="${i}"]`));
+        const nv  = /** @type {HTMLElement|null} */ (this._popupEl.querySelector(`.wcnv[data-idx="${i}"]`));
         if (sld && this._popupEl.ownerDocument.activeElement !== sld) {
           const val = parseFloat(st.state);
           const min = parseFloat(sld.min);
           const max = parseFloat(sld.max);
-          sld.value = isNaN(val) ? min : val;
+          sld.value = String(isNaN(val) ? min : val);
           const pct = ((val - min) / (max - min) * 100).toFixed(1);
           sld.style.background = `linear-gradient(to right,#42A5F5 ${pct}%,rgba(255,255,255,0.18) ${pct}%)`;
           if (nv) {
@@ -232,7 +235,7 @@ class WasherCard extends HTMLElement {
           }
         }
       } else if (ctrl.type === 'select') {
-        const sel = this._popupEl.querySelector(`.wcslt[data-idx="${i}"]`);
+        const sel = /** @type {HTMLInputElement|null} */ (this._popupEl.querySelector(`.wcslt[data-idx="${i}"]`));
         if (sel && this._popupEl.ownerDocument.activeElement !== sel) sel.value = st.state;
       }
     });
@@ -274,14 +277,14 @@ class WasherCard extends HTMLElement {
     this._popupEl.querySelector('#wcCL')?.addEventListener('click', () => this._closePopup());
 
     // Switch-Toggles
-    this._popupEl.querySelectorAll('.wcsw').forEach(el => {
+    (/** @type {NodeListOf<HTMLElement>} */ (this._popupEl.querySelectorAll('.wcsw'))).forEach(el => {
       el.addEventListener('click', () => {
         this._hass.callService('homeassistant', 'toggle', { entity_id: el.dataset.entity });
       });
     });
 
     // Number-Slider
-    this._popupEl.querySelectorAll('.wcsld').forEach(el => {
+    (/** @type {NodeListOf<HTMLInputElement & HTMLElement>} */ (this._popupEl.querySelectorAll('.wcsld'))).forEach(el => {
       const updateSlider = () => {
         const min  = parseFloat(el.min);
         const max  = parseFloat(el.max);
@@ -302,7 +305,7 @@ class WasherCard extends HTMLElement {
     });
 
     // Select-Dropdowns
-    this._popupEl.querySelectorAll('.wcslt').forEach(el => {
+    (/** @type {NodeListOf<HTMLInputElement & HTMLElement>} */ (this._popupEl.querySelectorAll('.wcslt'))).forEach(el => {
       el.addEventListener('change', () => {
         const [domain] = el.dataset.entity.split('.');
         const svcDomain = domain === 'input_select' ? 'input_select' : 'select';
@@ -338,7 +341,7 @@ class WasherCard extends HTMLElement {
       const max   = parseFloat(st?.attributes?.max  ?? 100);
       const step  = parseFloat(st?.attributes?.step ?? 1);
       const unit  = st?.attributes?.unit_of_measurement || '';
-      const cur   = parseFloat(st?.state ?? min);
+      const cur   = parseFloat(String(st?.state ?? min));
       const pct   = isNaN(cur) ? 0 : ((cur - min) / (max - min) * 100).toFixed(1);
       const dec   = step < 1 ? (String(step).split('.')[1]?.length || 1) : 0;
       const disp  = isNaN(cur) ? '–' : cur.toFixed(dec) + (unit ? ' ' + unit : '');
@@ -570,6 +573,7 @@ class WasherCardEditor extends HTMLElement {
     this._rendered = false;
   }
 
+  /** @param {LovelaceCardConfig} config */
   setConfig(config) {
     this._config = { ...config };
     if (!Array.isArray(this._config.popup_controls)) this._config.popup_controls = [];
@@ -580,6 +584,7 @@ class WasherCardEditor extends HTMLElement {
     }
   }
 
+  /** @param {HomeAssistant} hass */
   set hass(hass) {
     this._hass = hass;
     if (!this._rendered) {
@@ -609,7 +614,7 @@ class WasherCardEditor extends HTMLElement {
     [['field_entity','entity'],['field_state_entity','state_entity'],
      ['field_power_entity','power_entity'],['field_timer_entity','timer_entity']]
       .forEach(([fid, key]) => {
-        const el  = root.getElementById(fid)?.querySelector('input[type=text]');
+        const el  = /** @type {HTMLInputElement|null} */ (root.getElementById(fid)?.querySelector('input[type=text]'));
         const btn = root.getElementById(fid)?.querySelector('button');
         if (el && active !== el) {
           el.value = c[key] || '';
@@ -617,9 +622,9 @@ class WasherCardEditor extends HTMLElement {
         }
       });
 
-    const nameEl = root.getElementById('name');
+    const nameEl = /** @type {HTMLInputElement|null} */ (root.getElementById('name'));
     if (nameEl && active !== nameEl) nameEl.value = c.name || '';
-    const asEl = root.getElementById('active_states');
+    const asEl = /** @type {HTMLInputElement|null} */ (root.getElementById('active_states'));
     if (asEl && active !== asEl) asEl.value = c.active_states || _WC_DEFAULT_ACTIVE;
     this._updateActionFields();
   }
@@ -981,18 +986,18 @@ class WasherCardEditor extends HTMLElement {
     this._updatePopupControls();
 
     root.getElementById('typeBtns').addEventListener('click', e => {
-      const btn = e.target.closest('[data-type]');
+      const btn = /** @type {HTMLElement|null} */ ((/** @type {HTMLElement} */ (e.target)).closest('[data-type]'));
       if (!btn) return;
       const type = btn.dataset.type;
-      root.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('selected', b.dataset.type === type));
+      (/** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll('.type-btn'))).forEach(b => b.classList.toggle('selected', b.dataset.type === type));
       this._config = { ...this._config, machine_type: type };
       this._emit();
     });
     root.getElementById('name').addEventListener('change', e => {
-      this._config = { ...this._config, name: e.target.value }; this._emit();
+      this._config = { ...this._config, name: (/** @type {HTMLInputElement} */ (e.target)).value }; this._emit();
     });
     root.getElementById('active_states').addEventListener('change', e => {
-      this._config = { ...this._config, active_states: e.target.value }; this._emit();
+      this._config = { ...this._config, active_states: (/** @type {HTMLInputElement} */ (e.target)).value }; this._emit();
     });
     root.getElementById('addPopupCtrl').addEventListener('click', () => {
       const ctrls = [...(this._config.popup_controls || [])];
@@ -1002,26 +1007,26 @@ class WasherCardEditor extends HTMLElement {
       this._updatePopupControls();
     });
     root.getElementById('tap_action_type').addEventListener('change', e => {
-      this._config = { ...this._config, tap_action: { ...this._config.tap_action, action: e.target.value } };
+      this._config = { ...this._config, tap_action: { ...this._config.tap_action, action: (/** @type {HTMLInputElement} */ (e.target)).value } };
       this._emit(); this._updateActionFields();
     });
     root.getElementById('nav_path').addEventListener('change', e => {
-      this._config = { ...this._config, tap_action: { ...this._config.tap_action, navigation_path: e.target.value } }; this._emit();
+      this._config = { ...this._config, tap_action: { ...this._config.tap_action, navigation_path: (/** @type {HTMLInputElement} */ (e.target)).value } }; this._emit();
     });
     root.getElementById('svc_name').addEventListener('change', e => {
-      this._config = { ...this._config, tap_action: { ...this._config.tap_action, service: e.target.value } }; this._emit();
+      this._config = { ...this._config, tap_action: { ...this._config.tap_action, service: (/** @type {HTMLInputElement} */ (e.target)).value } }; this._emit();
     });
     root.getElementById('url_path').addEventListener('change', e => {
-      this._config = { ...this._config, tap_action: { ...this._config.tap_action, url_path: e.target.value } }; this._emit();
+      this._config = { ...this._config, tap_action: { ...this._config.tap_action, url_path: (/** @type {HTMLInputElement} */ (e.target)).value } }; this._emit();
     });
     root.getElementById('show_state').addEventListener('change', e => {
-      this._config = { ...this._config, show_state: e.target.checked }; this._emit();
+      this._config = { ...this._config, show_state: (/** @type {HTMLInputElement} */ (e.target)).checked }; this._emit();
     });
     root.getElementById('show_power').addEventListener('change', e => {
-      this._config = { ...this._config, show_power: e.target.checked }; this._emit();
+      this._config = { ...this._config, show_power: (/** @type {HTMLInputElement} */ (e.target)).checked }; this._emit();
     });
     root.getElementById('border_radius').addEventListener('change', e => {
-      this._config = { ...this._config, border_radius: parseInt(e.target.value) }; this._emit();
+      this._config = { ...this._config, border_radius: parseInt((/** @type {HTMLInputElement} */ (e.target)).value) }; this._emit();
     });
   }
 }

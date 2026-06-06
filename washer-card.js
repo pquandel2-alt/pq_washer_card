@@ -1,6 +1,6 @@
 // @ts-check
 // =====================================================================
-//  Washer Card v1.0.7
+//  Washer Card v1.0.8
 // =====================================================================
 
 const _WC_LABELS = {
@@ -117,15 +117,17 @@ class WasherCard extends HTMLElement {
   setConfig(config) {
     if (!config) throw new Error('Keine Konfiguration');
     this._config = {
-      machine_type:   'washer',
-      name:           '',
-      show_power:     true,
-      show_state:     true,
-      active_states:  _WC_DEFAULT_ACTIVE,
-      tap_action:     { action: 'more-info' },
-      border_radius:  16,
-      popup_controls: [],
-      timer_entity:   '',
+      machine_type:       'washer',
+      name:               '',
+      show_power:         true,
+      show_state:         true,
+      active_states:      _WC_DEFAULT_ACTIVE,
+      tap_action:         { action: 'more-info' },
+      border_radius:      16,
+      size_scale:         1,
+      hide_when_inactive: false,
+      popup_controls:     [],
+      timer_entity:       '',
       ...config,
     };
     if (!Array.isArray(this._config.popup_controls)) this._config.popup_controls = [];
@@ -406,6 +408,15 @@ class WasherCard extends HTMLElement {
       isOn = false;
     }
 
+    if (cfg.hide_when_inactive && !isOn) {
+      const hiddenKey = 'hidden|' + rawState;
+      if (hiddenKey !== this._lastKey) {
+        this._lastKey = hiddenKey;
+        this.shadowRoot.innerHTML = '<style>:host{display:none!important}</style>';
+      }
+      return;
+    }
+
     const isRunning  = isOn && (stateSt ? this._activeSet().has(rawState) : isOn);
     const isFinished = rawState === 'finish';
     const stateColor = _wcColor(rawState, isOn);
@@ -418,6 +429,7 @@ class WasherCard extends HTMLElement {
       || stateSt?.attributes?.friendly_name
       || (cfg.machine_type === 'dryer' ? 'Trockner' : 'Waschmaschine');
     const br         = cfg.border_radius ?? 16;
+    const scale      = cfg.size_scale ?? 1;
     const hasPopup   = cfg.popup_controls?.length > 0;
     const clickable  = hasPopup || (cfg.tap_action?.action ?? 'more-info') !== 'none';
 
@@ -477,6 +489,7 @@ class WasherCard extends HTMLElement {
           background:rgba(255,255,255,0.06);
           border:1px solid ${isOn && !isFinished ? stateColor + '44' : isFinished ? '#4CAF5066' : 'rgba(255,255,255,0.12)'};
           border-radius:${br}px;
+          zoom:${scale};
           padding:16px;
           box-sizing:border-box;
           cursor:${clickable ? 'pointer' : 'default'};
@@ -635,6 +648,10 @@ class WasherCardEditor extends HTMLElement {
     if (nameEl && active !== nameEl) nameEl.value = c.name || '';
     const asEl = /** @type {HTMLInputElement|null} */ (root.getElementById('active_states'));
     if (asEl && active !== asEl) asEl.value = c.active_states || _WC_DEFAULT_ACTIVE;
+    const scaleEl = /** @type {HTMLInputElement|null} */ (root.getElementById('size_scale'));
+    if (scaleEl && active !== scaleEl) scaleEl.value = String(c.size_scale ?? 1);
+    const hideEl = /** @type {HTMLInputElement|null} */ (root.getElementById('hide_when_inactive'));
+    if (hideEl) hideEl.checked = !!c.hide_when_inactive;
     this._updateActionFields();
   }
 
@@ -983,9 +1000,18 @@ class WasherCardEditor extends HTMLElement {
           <label>Leistung anzeigen</label>
           <input type="checkbox" id="show_power" ${c.show_power!==false?'checked':''} />
         </div>
+        <div class="toggle-row">
+          <label>Ausblenden wenn inaktiv</label>
+          <input type="checkbox" id="hide_when_inactive" ${c.hide_when_inactive?'checked':''} />
+        </div>
         <div class="field">
           <label>Eckenradius (px)</label>
           <input type="number" id="border_radius" value="${c.border_radius??16}" min="0" max="40" />
+        </div>
+        <div class="field">
+          <label>Kartengröße (Skalierung)</label>
+          <input type="number" id="size_scale" value="${c.size_scale??1}" min="0.5" max="2" step="0.05" />
+          <span class="hint">1.0 = normal, 0.8 = kompakter, 1.3 = größer</span>
         </div>
 
       </div>
@@ -1034,8 +1060,15 @@ class WasherCardEditor extends HTMLElement {
     root.getElementById('show_power').addEventListener('change', e => {
       this._config = { ...this._config, show_power: (/** @type {HTMLInputElement} */ (e.target)).checked }; this._emit();
     });
+    root.getElementById('hide_when_inactive').addEventListener('change', e => {
+      this._config = { ...this._config, hide_when_inactive: (/** @type {HTMLInputElement} */ (e.target)).checked }; this._emit();
+    });
     root.getElementById('border_radius').addEventListener('change', e => {
       this._config = { ...this._config, border_radius: parseInt((/** @type {HTMLInputElement} */ (e.target)).value) }; this._emit();
+    });
+    root.getElementById('size_scale').addEventListener('change', e => {
+      const v = parseFloat((/** @type {HTMLInputElement} */ (e.target)).value);
+      this._config = { ...this._config, size_scale: isNaN(v) ? 1 : v }; this._emit();
     });
   }
 }

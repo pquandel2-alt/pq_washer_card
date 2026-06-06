@@ -88,6 +88,15 @@ function _wcFmtTime(st) {
     return m > 0 ? `${m}:${String(s).padStart(2,'0')}` : `${Math.round(val)} s`;
   }
   if (/^\d+:\d{2}(:\d{2})?$/.test(st.state)) return st.state;
+  // ISO-Timestamp → verbleibende Zeit bis dahin
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(st.state)) {
+    const diffMs = new Date(st.state) - Date.now();
+    if (diffMs <= 0) return null;
+    const totalMin = Math.round(diffMs / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2,'0')}` : `${m} min`;
+  }
   return st.state + (unit ? ' ' + unit : '');
 }
 
